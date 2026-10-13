@@ -1,0 +1,24 @@
+server:
+  port: 8000
+spring:
+  application:
+    name: user-service
+  datasource:
+    username: root
+    password: Dinhminhchien@123
+    url: jdbc:mysql://localhost:3306/user_service
+keycloak:
+  auth-server-url: http://localhost:9999
+  realm: Web-Authentication
+  resource: E-commerce_website
+  credentials:
+    secret: '01IKxb69YgTwjkMV8FO5qUrPemfxaWdk'
+eureka:
+  client:
+    service-url:
+      defaultZone: http://localhost:8761/eureka/
+  instance:
+    prefer-ip-address: true
+    # Đây là dòng quyết định định dạng hiển thị giống hệt video:
+    instance-id: ${spring.cloud.client.ip-address}:${spring.application.name}:${server.port}
+
