@@ -30,6 +30,7 @@ public class MicroserviceSecurityConfig {
                 .authorizeHttpRequests(auth -> auth
                         // Các API nội bộ hoặc công khai thì cấu hình ở đây (tuỳ chọn)
                          .requestMatchers("/v1/auth/**").permitAll()
+                        .requestMatchers("/v1/public/**").permitAll()
                         // Còn lại bắt buộc phải có thông tin xác thực (đã được nhét từ Filter)
                         .anyRequest().authenticated()
                 )

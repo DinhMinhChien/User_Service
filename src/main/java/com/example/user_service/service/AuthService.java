@@ -1,14 +1,14 @@
 package com.example.user_service.service;
 
-import com.example.user_service.dto.request.ChangePasswordRequest;
-import com.example.user_service.dto.request.UserLoginRequest;
-import com.example.user_service.dto.request.UserRegisterRequest;
+import com.example.user_service.dto.request.*;
 
 import java.util.Map;
 
 public interface AuthService {
-    void register(UserRegisterRequest request) ;
+    void registerCustomer(CustomerRegisterRequest request) ;
+    void registerSeller(SellerRegisterRequest request) ;
     Map<String,Object> login(UserLoginRequest request) ;
-    void delete(String keyCloakId) ;
-    void changePassword(String username,String userUuid,ChangePasswordRequest request) ;
+    Map<String,Object> refreshToken(TokenRefreshRequest request) ;
+    void logout(String accessToken, String refreshToken);
+    void changePassword(String username,String keycloakUserId,ChangePasswordRequest request) ;
 }

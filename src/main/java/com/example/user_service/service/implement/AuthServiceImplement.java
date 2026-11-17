@@ -1,14 +1,11 @@
 package com.example.user_service.service.implement;
 
-import com.example.user_service.dto.request.ChangePasswordRequest;
-import com.example.user_service.dto.request.UserLoginRequest;
-import com.example.user_service.dto.request.UserRegisterRequest;
-import com.example.user_service.dto.request.UserSaveRequest;
-import com.example.user_service.entity.Address;
+import com.example.user_service.common.BaseResponse;
+import com.example.user_service.dto.request.*;
 import com.example.user_service.entity.User;
 import com.example.user_service.exception.BusinessException;
-import com.example.user_service.mapper.UserMapper;
-import com.example.user_service.repository.AddressRepository;
+import com.example.user_service.client.ShopClient;
+import com.example.user_service.client.dto.request.ShopCreateRequest;
 import com.example.user_service.repository.UserRepository;
 import com.example.user_service.service.AuthService;
 import jakarta.ws.rs.core.Response;
@@ -28,11 +25,15 @@ import org.springframework.util.LinkedMultiValueMap;
 import org.springframework.util.MultiValueMap;
 import org.springframework.web.reactive.function.client.WebClient;
 import org.springframework.web.reactive.function.client.WebClientResponseException;
+import org.springframework.data.redis.core.StringRedisTemplate;
+import com.auth0.jwt.JWT;
+import com.auth0.jwt.interfaces.DecodedJWT;
+import java.util.concurrent.TimeUnit;
+import java.util.Date;
 
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
-
 
 @Service
 @RequiredArgsConstructor
@@ -48,6 +49,7 @@ public class AuthServiceImplement implements AuthService {
     private String serverUrl ;
 
     private final WebClient.Builder webClientBuilder;
+    private final ShopClient shopClient ;
 
     @Value("${keycloak.resource}")
     private String clientId ;
@@ -55,13 +57,109 @@ public class AuthServiceImplement implements AuthService {
     private String clientSecret ;
 
     private final UserRepository userRepository ;
-    private final AddressRepository addressRepository ;
-    private final UserMapper userMapper ;
+    private final StringRedisTemplate redisTemplate;
+
+    private static final String ROLE_CUSTOMER = "CUSTOMER";
+    private static final String ROLE_SELLER = "SELLER";
+
+    @Override
+    @Transactional
+    public void registerCustomer(CustomerRegisterRequest request) {
+
+        KeycloakUserCreateRequest keycloakUserCreateRequest = new KeycloakUserCreateRequest (
+                                                                    request.getUsername(),
+                                                                    request.getEmail(),
+                                                                    request.getPassword(),ROLE_CUSTOMER
+                                                             ) ;
+
+        String keycloakUserId = createKeycloakUser(keycloakUserCreateRequest) ;
+
+        // 3. Lưu cái keycloakUserId này vào MySQL nội bộ của bạn
+        User user = new User() ;
+
+        user.setKeycloakUserId(keycloakUserId);
+        user.setUsername(request.getUsername());
+        user.setEmail(request.getEmail());
+        user.setPhoneNumber(request.getPhoneNumber());
+        user.setRole(ROLE_CUSTOMER);
+        user.setFullName(request.getFullName());
+        user.setStatus("ACTIVE");
+
+        userRepository.save(user) ;
+
+    }
+
+    /**
+     * Khách hàng đăng ký trở thành người bán cần chờ quản trị viên xét duyệt hồ sơ (pending)
+     * Trạng thái khi mới đăng kí là ACTIVE với role CUSTOMER
+     * Khi quản trị viên duyệt hồ sơ thành công ,đổi vai trò thành SELLER và trạng thai gian hàng thành appended"
+     * @param request
+     */
 
 
     @Override
     @Transactional
-    public void register(UserRegisterRequest request) {
+    public void registerSeller(SellerRegisterRequest request) {
+        String keycloakUserId = null ;
+        try {
+            KeycloakUserCreateRequest keycloakUserCreateRequest = new KeycloakUserCreateRequest(
+                    request.getUsername(),
+                    request.getEmail(),
+                    request.getPassword(), ROLE_CUSTOMER
+            );
+
+            keycloakUserId = createKeycloakUser(keycloakUserCreateRequest);
+
+            User user = new User();
+
+            // Lưu thông tin tạm thời người dùng đăng kí trở thành người bán
+            user.setKeycloakUserId(keycloakUserId);
+            user.setUsername(request.getUsername());
+            user.setEmail(request.getEmail());
+            user.setPhoneNumber(request.getPhoneNumber());
+            user.setRole(ROLE_CUSTOMER);
+            user.setFullName(request.getFullName());
+            user.setStatus("ACTIVE");
+
+            // Gửi thông tin tạo gian hàng đến shop-service
+            ShopCreateRequest shopCreateRequest = new ShopCreateRequest(
+                    keycloakUserId,
+                    request.getShopName(),
+                    request.getDescriptionShop(),
+                    request.getFullName(),
+                    request.getPhoneNumber(),
+                    request.getProvinceCode(),
+                    request.getProvinceName(),
+                    request.getWardCode(),
+                    request.getWardName(),
+                    request.getDetailAddress()
+            );
+
+            BaseResponse<String> response = shopClient.createShop(shopCreateRequest);
+            if (response.getMeta().getCode() != 200) {
+                throw new BusinessException("Lỗi khi tao cửa hàng");
+            }
+
+            userRepository.save(user);
+        } catch (Exception e) {
+            if (keycloakUserId != null) {
+                try {
+                    keycloak.realm(realm).users().get(keycloakUserId).remove();
+                } catch (Exception keycloakException) {
+
+                }
+            }
+
+            if (e instanceof RuntimeException) {
+                throw (RuntimeException) e;
+            }
+            throw new RuntimeException(e);
+        }
+
+    }
+
+
+    private String createKeycloakUser(KeycloakUserCreateRequest request) {
 
         UserRepresentation user = new UserRepresentation();
         user.setEnabled(true);
@@ -96,7 +194,7 @@ public class AuthServiceImplement implements AuthService {
         }
 
         String path = response.getLocation().getPath();
-        String keycloakUuid = path.substring(path.lastIndexOf('/') + 1);
+        String keycloakUserId = path.substring(path.lastIndexOf('/') + 1);
         response.close();
 
         try {
@@ -111,8 +209,8 @@ public class AuthServiceImplement implements AuthService {
             String clientUuid = clients.get(0).getId();
 
             // 3.2. Lấy role từ request
-            String targetRoleName = request.getRole() != null ? request.getRole() : "USER";
-            if (!List.of("ADMIN", "USER", "SHIPPER").contains(targetRoleName)) {
+            String targetRoleName = request.getRole() != null ? request.getRole() : "CUSTOMER";
+            if (!List.of("ADMIN", "CUSTOMER", "SELLER").contains(targetRoleName)) {
                 throw new BusinessException(400, "Role không hợp lệ trên hệ thống!");
             }
 
@@ -122,7 +220,7 @@ public class AuthServiceImplement implements AuthService {
                     .roles().get(targetRoleName)
                     .toRepresentation();
 
-            keycloak.realm(realm).users().get(keycloakUuid)
+            keycloak.realm(realm).users().get(keycloakUserId)
                     .roles().clientLevel(clientUuid).add(Collections.singletonList(clientRole));
 
         } catch (BusinessException e) {
@@ -131,76 +229,104 @@ public class AuthServiceImplement implements AuthService {
             log.error("Không thể gán role {} cho user {}: {}", request.getRole(), request.getUsername(), e.getMessage());
             throw new BusinessException(500, "Lỗi từ Keycloak: " + e.getMessage());
         }
-
-        // 3. Lưu cái keycloakUserId này vào MySQL nội bộ của bạn
-        UserSaveRequest userSaveRequest = userMapper.toUserSave(request) ;
-        saveUser(userSaveRequest) ;
-
-         // 4. Lưu địa chỉ của người dùng
-        Address address = new Address() ;
-        address.setUsername(request.getUsername());
-        address.setRecipientName(request.getFullName());
-        address.setRecipientPhone(request.getPhone());
-        address.setCommune(request.getCommune());
-        address.setProvince(request.getProvince());
-        address.setAddressLine(request.getAddressLine());
-        address.setIsDefault(Boolean.TRUE);
-        addressRepository.save(address) ;
+        return keycloakUserId ;
 
     }
-    public void saveUser(UserSaveRequest request) {
-        User localUser = new User();
-        localUser.setUsername(request.getUsername());
-        localUser.setFullName(request.getFullName());
-        localUser.setPhone(request.getPhone()) ;
-        localUser.setEmail(request.getEmail());
-        localUser.setRole(request.getRole());
-        userRepository.save(localUser);
-    }
-
     @Override
     public Map<String,Object> login(UserLoginRequest request) {
+        String username = request.getUsername() ;
+        String password = request.getPassword();
+
+        User user = userRepository.findUserByUsername(username)
+                .orElseThrow(() -> new BusinessException("Tài khoản có tên đăng nhập " + username +" không tồn tại !"));
+        if ("LOCKED".equals(user.getStatus())) {
+            throw new BusinessException("Tài khoản người dùng có tên đăng nhập " + username + " hiện đang bị khóa");
+        }
 
         MultiValueMap<String, String> formData = new LinkedMultiValueMap<>();
         formData.add("client_id", clientId);
-        formData.add("client_secret", clientSecret); // Bỏ dòng này nếu Client trong Keycloak là Public
+        formData.add("client_secret", clientSecret);
         formData.add("grant_type", "password");
-        formData.add("username", request.getUsername());
-        formData.add("password", request.getPassword());
+        formData.add("username", username);
+        formData.add("password", password);
 
         // 2. Gọi API chuẩn với Content-Type phù hợp
         Map<String, Object> response = webClientBuilder.build()
                 .post()
                 .uri(serverUrl + "/realms/" + realm + "/protocol/openid-connect/token")
-                .contentType(MediaType.APPLICATION_FORM_URLENCODED) // Bắt buộc phải có
+                .contentType(MediaType.APPLICATION_FORM_URLENCODED)
                 .bodyValue(formData)
                 .retrieve()
                 .bodyToMono(new ParameterizedTypeReference<Map<String, Object>>() {})
-                .block(); // .block() dùng được nếu đây là ứng dụng Spring MVC truyền thống (blocking)
+                .block();
+
+
 
         return response;
     }
 
     @Override
-    public void delete(String keyCloakId) {
-        Response response = keycloak.realm(realm).users().delete(keyCloakId);
+    public Map<String, Object> refreshToken(TokenRefreshRequest refreshToken) {
+        MultiValueMap<String, String> formData = new LinkedMultiValueMap<>();
+        formData.add("client_id", clientId);
+        formData.add("client_secret", clientSecret); // Bắt buộc truyền client secret
+        formData.add("grant_type", "refresh_token");
+        formData.add("refresh_token", refreshToken.getRefreshToken());
 
-        // Keycloak trả về mã 204 (No Content) nếu xóa thành công
-        if (response.getStatus() != 204) {
-            String errorMessage = response.readEntity(String.class);
-            response.close();
-            throw new RuntimeException("Cannot delete user in Keycloak. Status: "
-                    + response.getStatus() + ", error: " + errorMessage);
-        }
+        // Gọi API Keycloak
+        Map<String, Object> response = webClientBuilder.build()
+                .post()
+                .uri(serverUrl + "/realms/" + realm + "/protocol/openid-connect/token")
+                .contentType(MediaType.APPLICATION_FORM_URLENCODED)
+                .bodyValue(formData)
+                .retrieve()
+                .bodyToMono(new ParameterizedTypeReference<Map<String, Object>>() {})
+                .block();
 
-        response.close();
-        System.out.println("========== TEST KEYCLOAK ==========");
-        System.out.println("Đã xóa thành công user có ID: " + keyCloakId);
-        System.out.println("===================================");
+        return response;
     }
 
     @Override
-    public void changePassword(String username,String userUuid ,ChangePasswordRequest request) {
+    public void logout(String accessToken, String refreshToken) {
+        try {
+            // 1. Phân tích Access Token để lấy thời gian hết hạn (sử dụng thư viện auth0)
+            DecodedJWT jwt = JWT.decode(accessToken);
+            Date expiresAt = jwt.getExpiresAt();
+            long ttl = expiresAt.getTime() - System.currentTimeMillis();
+
+            // 2. Nếu token vẫn còn hạn, đưa vào danh sách đen trên Redis
+            if (ttl > 0) {
+                redisTemplate.opsForValue().set(
+                        "BLACKLIST:" + accessToken,
+                        "LOGOUT",
+                        ttl,
+                        TimeUnit.MILLISECONDS
+                );
+            }
+
+            // 3. Vô hiệu hóa Refresh Token và Session trên Keycloak
+            MultiValueMap<String, String> formData = new LinkedMultiValueMap<>();
+            formData.add("client_id", clientId);
+            formData.add("client_secret", clientSecret);
+            formData.add("refresh_token", refreshToken);
+
+            webClientBuilder.build()
+                    .post()
+                    .uri(serverUrl + "/realms/" + realm + "/protocol/openid-connect/logout")
+                    .contentType(MediaType.APPLICATION_FORM_URLENCODED)
+                    .bodyValue(formData)
+                    .retrieve()
+                    .bodyToMono(Void.class)
+                    .block();
+
+        } catch (Exception e) {
+            log.error("Lỗi trong quá trình đăng xuất: {}", e.getMessage());
+            throw new BusinessException(500, "Không thể xử lý yêu cầu đăng xuất");
+        }
+    }
+
+    @Override
+    public void changePassword(String username,String keycloakUserId ,ChangePasswordRequest request) {
         try {
             UserLoginRequest userLogin = new UserLoginRequest(username, request.getOldPassword());
             this.login(userLogin) ;
@@ -217,7 +343,7 @@ public class AuthServiceImplement implements AuthService {
 
         keycloak.realm(realm)
                 .users()
-                .get(userUuid)
+                .get(keycloakUserId)
                 .resetPassword(credential);
     }
 

@@ -24,19 +24,28 @@ public class User extends BaseEntity implements Serializable {
     @Column(name = "id")
     private String id ;
 
+    @Column(name = "keycloak_user_id")
+    private String keycloakUserId ;
+
     @Column(name = "username")
     private String username ;
-
-    @Column(name = "full_name")
-    private String fullName ;
-
-    @Column(name = "phone")
-    private String phone ;
 
     @Column(name = "email")
     private String email ;
 
+    @Column(name = "phone_number")
+    private String phoneNumber ;
+
     @Column(name = "role")
     private String role ;
+
+    @Column(name = "full_name")
+    private String fullName ;
+
+    @Column(name = "avatar_url")
+    private String avatarUrl ;
+
+    @Column(name = "status")
+    private String status ;
 
 }

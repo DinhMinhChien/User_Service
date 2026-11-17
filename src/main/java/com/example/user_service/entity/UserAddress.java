@@ -17,32 +17,36 @@ import java.io.Serializable;
 @Getter
 @NoArgsConstructor
 @AllArgsConstructor
-@Table(name = "addresses")
-public class Address extends BaseEntity implements Serializable {
+@Table(name = "user_addresses")
+public class UserAddress extends BaseEntity implements Serializable {
     @Id
     @UuidGenerator
     @Column(name = "id")
     private String id ;
 
-    @Column(name = "username")
-    private String username ;
+    @Column(name = "user_id")
+    private String userId ;
 
     @Column(name = "recipient_name")
     private String recipientName ;
 
-    @Column(name = "recipient_phone")
-    private String recipientPhone ;
+    @Column(name = "phone_number")
+    private String phoneNumber ;
 
-    // xã / phường / đặc khu
-    @Column(name = "commune")
-    private String commune ;
+    @Column(name = "province_code")
+    private String provinceCode ;
 
-    // tỉnh / thành phố
-    @Column(name = "province")
-    private String province ;
+    @Column(name = "province_name")
+    private String provinceName ;
 
-    @Column(name = "address_line")
-    private String addressLine ;
+    @Column(name = "ward_code")
+    private String wardCode ;
+
+    @Column(name = "ward_name")
+    private String wardName ;
+
+    @Column(name = "detail_address")
+    private String detailAddress ;
 
     @Column(name = "is_default")
     private Boolean isDefault ;

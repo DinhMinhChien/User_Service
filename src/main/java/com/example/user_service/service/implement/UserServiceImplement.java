@@ -1,16 +1,20 @@
 package com.example.user_service.service.implement;
 
-import com.example.user_service.dto.request.AddressRequest;
+import com.example.user_service.dto.request.ProfileUpdateRequest;
+import com.example.user_service.dto.request.UserAddressCreateRequest;
+import com.example.user_service.dto.response.UserAddressResponse;
 import com.example.user_service.dto.response.UserProfileResponse;
-import com.example.user_service.entity.Address;
+import com.example.user_service.entity.UserAddress;
 import com.example.user_service.entity.User;
 import com.example.user_service.exception.BusinessException;
+import com.example.user_service.mapper.UserAddressMapper;
 import com.example.user_service.mapper.UserMapper;
-import com.example.user_service.repository.AddressRepository;
+import com.example.user_service.repository.UserAddressRepository;
 import com.example.user_service.repository.UserRepository;
 import com.example.user_service.service.UserService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 
@@ -19,41 +23,95 @@ import java.util.List;
 public class UserServiceImplement implements UserService {
 
     private final UserRepository userRepository ;
-    private final AddressRepository addressRepository ;
+    private final UserAddressRepository userAddressRepository;
     private final UserMapper userMapper ;
+    private final UserAddressMapper userAddressMapper ;
 
     @Override
     public UserProfileResponse getProfile(String username) {
         // 1. Lấy dữ liệu
         User user = userRepository.findUserByUsername(username)
-                .orElseThrow(() -> new BusinessException("User not found with username: " + username));
+                .orElseThrow(() -> new BusinessException("Tài khoản có tên đăng nhập " + username +" không tồn tại !"));
 
-        List<Address> addresses = addressRepository.findAllByUsername(username);
+        UserAddress userAddressesDefault = userAddressRepository
+                .findUserAddressByUserIdAndIsDefaultAndDeleted(
+                    user.getId(),
+                    true,
+                    false
+                );
 
         // 2. Build response
-        UserProfileResponse response = userMapper.toProfileResponse(user,addresses) ;
+
+        UserAddressResponse userAddressResponse = userAddressMapper.toResponse(userAddressesDefault) ;
+        UserProfileResponse response = new UserProfileResponse();
+
+        response.setUsername(user.getUsername());
+        response.setRole(user.getRole());
+        response.setFullName(user.getFullName());
+        response.setEmail(user.getEmail());
+        response.setPhone(user.getPhoneNumber());
+        response.setAddressDefault(userAddressResponse);
 
         return response ;
     }
 
     @Override
-    public void insertAddress(String username, AddressRequest request) {
-        Address address = new Address();
+    @Transactional
+    public void updateProfile(String username, ProfileUpdateRequest request) {
+        User user = userRepository.findUserByUsername(username)
+                .orElseThrow(() -> new BusinessException("Tài khoản có tên đăng nhập " + username +" không tồn tại !"));
 
-        address.setUsername(username);
-        address.setRecipientName(request.getRecipientName());
-        address.setRecipientPhone(request.getRecipientPhone());
-        address.setCommune(request.getCommune());
-        address.setProvince(request.getProvince());
-        address.setAddressLine(request.getAddressLine());
+        user.setFullName(request.getFullName());
+        user.setEmail(request.getEmail());
+        user.setPhoneNumber(request.getPhoneNumber());
 
-        if (request.isDefault()) {
-            List<Address> addressList = addressRepository.findAllByUsername(username);
-            addressList.forEach(a -> a.setIsDefault(false));
-            addressRepository.saveAll(addressList) ;
+        userRepository.save(user) ;
+
+        UserAddress userAddressDefault = userAddressRepository.findUserAddressByUserIdAndIsDefaultAndDeleted(
+                user.getId(),
+                true,
+                false
+        ) ;
+        if (userAddressDefault == null) return;
+
+        userAddressDefault.setProvinceCode(request.getProvinceCode());
+        userAddressDefault.setProvinceName(request.getProvinceName());
+        userAddressDefault.setWardCode(request.getWardCode());
+        userAddressDefault.setWardName(request.getWardName());
+        userAddressDefault.setDetailAddress(request.getDetailAddress());
+
+        userAddressRepository.save(userAddressDefault) ;
+    }
+
+    @Override
+    @Transactional
+    public void createAddress(String username, UserAddressCreateRequest request) {
+        UserAddress userAddress = new UserAddress();
+        User user = userRepository.findUserByUsername(username)
+                .orElseThrow(() -> new BusinessException("Tài khoản có tên đăng nhập " + username +" không tồn tại !"));
+
+        userAddress.setUserId(user.getId());
+        userAddress.setRecipientName(request.getRecipientName());
+        userAddress.setPhoneNumber(request.getPhoneNumber());
+        userAddress.setProvinceCode(request.getProvinceCode());
+        userAddress.setProvinceName(request.getProvinceName());
+        userAddress.setWardCode(request.getWardCode());
+        userAddress.setWardName(request.getWardName());
+        userAddress.setDetailAddress(request.getDetailAddress());
+        if (request.getIsDefault()) {
+            UserAddress currentUserAddressDefault = userAddressRepository
+                    .findUserAddressByUserIdAndIsDefaultAndDeleted(
+                        user.getId(),
+                        true,
+                        false
+                    );
+            if (currentUserAddressDefault != null) {
+                currentUserAddressDefault.setIsDefault(false);
+                userAddressRepository.save(currentUserAddressDefault) ;
+            }
         }
-        address.setIsDefault(request.isDefault());
+        userAddress.setIsDefault(request.getIsDefault());
 
-        addressRepository.save(address);
+        userAddressRepository.save(userAddress);
     }
 }

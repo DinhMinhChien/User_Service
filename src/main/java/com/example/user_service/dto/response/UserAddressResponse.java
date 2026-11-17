@@ -9,9 +9,11 @@ import lombok.Setter;
 @Setter
 @NoArgsConstructor
 @AllArgsConstructor
-public class AddressResponse {
-    private String fullAddress ;
-    private Boolean isDefault ;
+public class UserAddressResponse {
     private String recipientName ;
-    private String recipientPhone ;
+    private String phoneNumber ;
+    private String provinceName ;
+    private String wardName ;
+    private String detailAddress ;
+    private Boolean isDefault ;
 }

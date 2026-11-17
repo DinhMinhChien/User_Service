@@ -9,8 +9,11 @@ import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ControllerAdvice;
 import org.springframework.web.bind.annotation.ExceptionHandler;
+import org.springframework.web.reactive.function.client.WebClientResponseException;
 
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 @RequiredArgsConstructor
@@ -76,6 +79,27 @@ public class GlobalExceptionHandler {
 
         ErrorResponse errorResponse = new ErrorResponse(message, systemMessage, code);
         return new ResponseEntity<>(errorResponse, HttpStatus.UNAUTHORIZED);
+    }
+
+    @ExceptionHandler({WebClientResponseException.class})
+    public ResponseEntity<Object> handleWebClientException(WebClientResponseException ex) {
+        // Bắt lỗi 400 từ Keycloak (Refresh token hết hạn hoặc sai)
+        if (ex.getStatusCode() == HttpStatus.BAD_REQUEST) {
+            String message = "Phiên đăng nhập đã hết hạn, vui lòng đăng nhập lại.";
+            List<String> systemMessage = List.of("Refresh token hết hạn hoặc không hợp lệ");
+            int code = 401;
+
+            ErrorResponse errorResponse = new ErrorResponse(message, systemMessage, code);
+            return new ResponseEntity<>(errorResponse, HttpStatus.UNAUTHORIZED);
+        }
+
+        // Các lỗi khác từ Keycloak
+        String message = "Lỗi xác thực từ server.";
+        List<String> systemMessage = List.of(ex.getMessage());
+        int code = ex.getStatusCode().value();
+
+        ErrorResponse errorResponse = new ErrorResponse(message, systemMessage, code);
+        return new ResponseEntity<>(errorResponse, ex.getStatusCode());
     }
 
 }

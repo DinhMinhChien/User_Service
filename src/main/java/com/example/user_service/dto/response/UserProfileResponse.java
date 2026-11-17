@@ -5,17 +5,16 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
 
-import java.util.List;
-
 @Getter
 @Setter
 @NoArgsConstructor
 @AllArgsConstructor
 public class UserProfileResponse {
     private String username ;
+    private String role ;
     private String fullName ;
-    private String phone ;
     private String email ;
-    private List<AddressResponse> address ;
+    private String phone ;
+    private UserAddressResponse addressDefault ;
 
 }
